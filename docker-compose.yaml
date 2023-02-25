@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  mysql:
+    image: mysql:8.0
+    restart: always
+    platform: linux/x86_64
+    environment:
+      MYSQL_ROOT_PASSWORD: 1234
+      MYSQL_DATABASE: cgoing_love
+      TZ: Asia/Seoul
+    volumes:
+      - ./app_data:/var/lib/mysql
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      - DB_HOST=mysql
+    ports:
+      - 5000:5000
+    depends_on:
+      - mysql
+networks:
+  corn_net:
+    driver: bridge

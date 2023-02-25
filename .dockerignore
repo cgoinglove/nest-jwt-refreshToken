@@ -1,0 +1,6 @@
+.git
+Dockerfile
+node_modules
+dist
+test
+/app_data
