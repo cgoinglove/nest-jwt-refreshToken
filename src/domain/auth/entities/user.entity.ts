@@ -40,4 +40,12 @@ export class User {
   hasRole(role: RoleType) {
     return this.authorities?.some((v) => v.authorityName == role);
   }
+
+  getJwtPayload() {
+    return {
+      id: this.id,
+      name: this.name,
+      roles: this.getRolesOnlyName(),
+    };
+  }
 }

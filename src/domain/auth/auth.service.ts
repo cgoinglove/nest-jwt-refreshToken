@@ -1,16 +1,10 @@
-import {
-  HttpException,
-  HttpStatus,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
-
+import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { parse as useragentParse } from 'express-useragent';
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Aes256, createSalt, toHash } from 'src/utils/cryptoUtil';
 import { Request, Response } from 'express';
 import { AuthHistory, UserDTO } from './dto';
-import { JwtPayload } from './auth.controller';
 import { User } from './entities/user.entity';
 import { TokenManager } from '../common/tokenManager';
 import { randomUUID } from 'crypto';
@@ -47,34 +41,33 @@ export class AuthService {
   }
 
   /** @로그인  */
-  async userCertification(
-    userDto: UserDTO,
-    request: Request,
-    response: Response,
-  ): Promise<JwtPayload> {
-    const user = await this.userRepository.findOne({
-      where: {
-        email: userDto.email,
-      },
-    });
-    if (!user || (await toHash(userDto.password, user.salt)) !== user.password)
-      throw new UnauthorizedException();
+  async userAssign(request: Request, response: Response) {
+    const user = request.user as User;
 
-    const refreshToken = {
+    const { platform, browser, os } = useragentParse(request.get('user-agent'));
+    const refreshTokenDTO = {
       id: randomUUID(),
       expiresDate: new Date(
         Date.now() + +process.env.JWT_REFRESH_TOKEN_EXPIRATION_TIME * 1000,
       ),
       userId: user.id,
+      platform,
+      browser,
+      os,
+      ip: request.ip,
     } as RefreshToken;
 
-    this.userRepository.save(user);
-    return await this.tokenManager.generateToken(
-      request,
+    this.tokenManager.tokenAssignToClient({
       response,
-      user,
-      refreshToken,
-    );
+      responseData: {
+        name: user.name,
+        roles: user.getRolesOnlyName(),
+      },
+      ...(await this.tokenManager.generateToken(
+        user.getJwtPayload(),
+        refreshTokenDTO,
+      )),
+    });
   }
 
   /** @로그아웃  */

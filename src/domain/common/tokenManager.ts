@@ -1,14 +1,13 @@
 import { IS_DEV_MODE } from '@/config';
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { Aes256 } from 'src/utils/cryptoUtil';
 import { Repository } from 'typeorm';
 import { RefreshToken } from '../auth/entities/user-refreshToken.entity';
 import { JwtPayload } from '../auth/auth.controller';
-import { User } from '../auth/entities/user.entity';
-import { parse as useragentParse } from 'express-useragent';
+
 @Injectable()
 export class TokenManager {
   constructor(
@@ -18,55 +17,41 @@ export class TokenManager {
   ) {}
 
   /** @verify */
-  async verify(request: Request, response: Response): Promise<JwtPayload> {
-    const accessToken = Aes256.decode(request.cookies.accessToken);
-    const refreshToken = Aes256.decode(request.cookies.refreshToken);
-    try {
-      return this.jwtService.verify(accessToken, {
-        secret: process.env.JWT_ACCESS_TOKEN_SECRET,
-      });
-    } catch (error) {
-      if (error.name != 'TokenExpiredError' || !refreshToken) {
-        throw new UnauthorizedException();
-      }
-      try {
-        const { id } = this.jwtService.verify(refreshToken, {
-          secret: process.env.JWT_REFRESH_TOKEN_SECRET,
-        });
-        const refreshTokenEntity = await this.refreshTokenRepository.findOne({
-          where: {
-            id,
-            refreshToken,
-            ip: request.ip,
-          },
-          relations: ['user'],
-        });
-        if (!refreshTokenEntity || !refreshTokenEntity.canUse())
-          throw new Error();
-        return await this.generateToken(
-          request,
-          response,
-          refreshTokenEntity.user,
-          refreshTokenEntity,
-        );
-      } catch (error) {
-        throw new UnauthorizedException();
-      }
-    }
+  accessTokenVerify(accessToken: string): JwtPayload {
+    return this.jwtService.verify(accessToken, {
+      secret: process.env.JWT_ACCESS_TOKEN_SECRET,
+    });
+  }
+  /** @verify */
+  async refreshTokenVerify(
+    refreshToken: string,
+    platform,
+    browser,
+    os,
+    ip: string,
+  ): Promise<RefreshToken> {
+    const { id } = this.jwtService.verify(refreshToken, {
+      secret: process.env.JWT_REFRESH_TOKEN_SECRET,
+    });
+    const refreshTokenEntity = await this.refreshTokenRepository.findOne({
+      where: {
+        id,
+        refreshToken,
+        platform,
+        browser,
+        os,
+        ip,
+      },
+      relations: ['user'],
+    });
+    if (!refreshTokenEntity || !refreshTokenEntity.canUse()) throw new Error();
+    return refreshTokenEntity;
   }
 
   async generateToken(
-    request: Request,
-    response: Response,
-    userEntity: User,
+    payload: JwtPayload,
     refreshTokenEntity: RefreshToken,
-  ): Promise<JwtPayload> {
-    const payload: JwtPayload = {
-      id: userEntity.id,
-      name: userEntity.name,
-      roles: userEntity.getRolesOnlyName(),
-    };
-
+  ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
     const accessToken = this.sign(
       payload,
       process.env.JWT_ACCESS_TOKEN_SECRET,
@@ -78,29 +63,18 @@ export class TokenManager {
       refreshTokenEntity.getExpiresIn?.() ||
         +process.env.JWT_REFRESH_TOKEN_EXPIRATION_TIME * 1000,
     );
-    const { platform, browser, os } = useragentParse(request.get('user-agent'));
+
     await this.refreshTokenRepository.save({
       ...refreshTokenEntity,
       refreshToken,
-      platform,
-      browser,
-      os,
-      ip: request.ip,
     });
 
-    Object.entries({
+    return {
       accessToken,
       refreshToken,
-    }).forEach(([key, value]) => {
-      response.cookie(key, Aes256.encode(value), {
-        maxAge: new Date(refreshTokenEntity.expiresDate).getTime() - Date.now(),
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: !IS_DEV_MODE,
-      });
-    });
-    request.user = payload;
-    return payload;
+      expiresIn:
+        new Date(refreshTokenEntity.expiresDate).getTime() - Date.now(),
+    };
   }
 
   private sign(
@@ -114,6 +88,33 @@ export class TokenManager {
       algorithm: 'HS256',
       issuer: 'cgoing',
     });
+  }
+
+  tokenAssignToClient({
+    response,
+    accessToken,
+    refreshToken,
+    expiresIn,
+    responseData,
+  }: {
+    response: Response;
+    accessToken: string;
+    refreshToken: string;
+    expiresIn?: number;
+    responseData?: any;
+  }) {
+    Object.entries({
+      accessToken,
+      refreshToken,
+    }).forEach(([key, value]) => {
+      response.cookie(key, Aes256.encode(value), {
+        maxAge: expiresIn,
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: !IS_DEV_MODE,
+      });
+    });
+    response.send(responseData);
   }
 
   async expireToken(response: Response, refreshToken: string) {

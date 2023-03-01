@@ -11,12 +11,14 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { UserDTO } from './dto';
 import { RoleType } from './role';
 import { LogService } from '../common/logger.service';
-import { JwtAuthGuard } from '../common/request.guard';
+import { JwtAuthGuard, RefreshTokenGuard } from '../common/request.guard';
+import { AuthGuard } from '@nestjs/passport';
+import { TokenManager } from '../common/tokenManager';
 
 export type JwtPayload = {
   id: string;
@@ -27,7 +29,11 @@ export type JwtPayload = {
 @ApiTags('auth api 입니다.')
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService, private logger: LogService) {}
+  constructor(
+    private authService: AuthService,
+    private logger: LogService,
+    private tokenManager: TokenManager,
+  ) {}
 
   @ApiOperation({ summary: '회원가입 하기! 이름은 test라고 넣을게요!' })
   @Post('/register')
@@ -38,19 +44,14 @@ export class AuthController {
   }
 
   @ApiOperation({ summary: 'login 을 시도합니다 ' })
-  @Post('/login')
+  @ApiBody({
+    type: UserDTO,
+  })
   @UsePipes(ValidationPipe)
-  async login(
-    @Body() user: UserDTO,
-    @Req() request: Request,
-    @Res() response: Response,
-  ) {
-    const { name, roles } = await this.authService.userCertification(
-      user,
-      request,
-      response,
-    );
-    return response.send({ name, roles });
+  @Post('/login')
+  @UseGuards(AuthGuard('local'))
+  async login(@Req() request: Request, @Res() response: Response) {
+    await this.authService.userAssign(request, response);
   }
 
   @ApiOperation({ summary: 'logout api 입니다!' })
@@ -66,12 +67,17 @@ export class AuthController {
   })
   @Get('/token')
   @UseGuards(JwtAuthGuard)
-  tokenSign(@Req() req: Request, @Res() res: Response) {
-    const user = req.user as JwtPayload;
-    res.send({
-      roles: user.roles,
-      name: user.name,
-    });
+  tokenSign() {
+    return;
+  }
+
+  @ApiOperation({
+    summary: 'refresh Token 으로 재발급 요청 ',
+  })
+  @Get('/refresh')
+  @UseGuards(RefreshTokenGuard)
+  refresh() {
+    return;
   }
 
   @ApiOperation({
