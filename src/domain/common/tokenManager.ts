@@ -44,7 +44,7 @@ export class TokenManager {
       },
       relations: ['user'],
     });
-    if (!refreshTokenEntity || !refreshTokenEntity.canUse()) throw new Error();
+    if (!refreshTokenEntity?.canUse()) throw new Error();
     return refreshTokenEntity;
   }
 
